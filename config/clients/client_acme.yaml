@@ -1,0 +1,36 @@
+client_id: acme_corp
+client_name: ACME Corporation
+
+data_source:
+  type: "csv"
+  path: "data/processed/acme_merged.csv"
+
+database:
+  url: "${DATABASE_URL}"
+  schema: "acme"
+
+countries: ["US", "Canada", "MENA"]
+risk_threshold: 0.15
+hallucination_threshold: 0.75
+
+digest_schedule: "08:00"
+timezone: "Asia/Kolkata"
+
+channels:
+  slack_webhook: "${ACME_SLACK_WEBHOOK}"
+
+soul_file: "soul/acme_soul.md"
+heartbeat_file: "heartbeat/acme_heartbeat.md"
+
+column_mapping:
+  Order Date: date
+  Country: country
+  City: branch
+  Sales: revenue
+  Profit: profit
+
+scout:
+  sector: "global retail"
+  competitors: ["IKEA", "Amazon", "Walmart", "Staples"]
+  keywords: ["retail supply chain", "furniture market trends", "office supplies demand", "global retail ecommerce"]
+  news_lookback_days: 1

@@ -1,0 +1,43 @@
+# === Environment & Secrets ===
+.env
+*.env
+
+# === Dataset files — never commit raw or processed data ===
+data/raw/
+data/processed/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# === Virtual Environment ===
+venv/
+.venv/
+env/
+
+# === IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Logs ===
+logs/
+*.log
+*.jsonl
+
+# === Docker ===
+pg_data/
+
+# === Model Cache ===
+.cache/

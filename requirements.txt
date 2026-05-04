@@ -1,0 +1,42 @@
+# === Core Framework ===
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+python-dotenv>=1.0.0
+
+# === LLM ===
+groq>=0.11.0
+
+# === Embeddings (CPU only — all-MiniLM-L6-v2, 384 dims, ~90MB) ===
+sentence-transformers>=3.0.0
+
+# === Database — PostgreSQL + pgvector ===
+psycopg2-binary>=2.9.9
+pgvector>=0.3.0
+asyncpg>=0.29.0
+
+# === Channel — Slack (Socket Mode) ===
+slack-bolt>=1.20.0
+
+# === Scheduler ===
+apscheduler>=3.10.0
+
+# === Web Search (Scout Agent) ===
+tavily-python>=0.5.0
+duckduckgo-search>=6.0.0
+
+# === Forecasting ===
+prophet>=1.1.5
+
+# === Data Processing ===
+pandas>=2.2.0
+numpy>=1.26.0
+openpyxl>=3.1.0
+faker>=28.0.0
+
+# === Config ===
+pydantic>=2.9.0
+pydantic-settings>=2.5.0
+pyyaml>=6.0.2
+
+# === HTTP Client ===
+httpx>=0.27.0
