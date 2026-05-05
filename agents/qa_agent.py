@@ -9,11 +9,12 @@ Threshold from client YAML hallucination_threshold (default 0.75).
 
 import json
 import logging
+import re
 from typing import Optional, List, Dict
 
 import pandas as pd
 
-from config.llm_client import get_llm_client, get_model_name
+from config.llm_client import get_llm_client, get_model_name, chat_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,9 @@ Your job: verify that the response ONLY contains claims supported by the provide
 ### 1. Branch Name Validation (CRITICAL)
 - Extract ALL branch/city names mentioned in the response
 - Compare against the branch names in the Data Context above
-- If ANY branch name appears in the response but NOT in the Data Context, this is a HALLUCINATION
+- Branch/entity names listed under "Valid Entities from User Question" are VALID even if not listed in query results
+- Branch/entity names listed under "Branches/entities filtered in SQL WHERE clause" are VALID even if not in result rows (e.g., if SQL has WHERE branch = 'X', then 'X' is valid context)
+- If ANY branch name appears in the response but NOT in the Data Context, the valid-entities list, or the SQL WHERE clause filters, this is a HALLUCINATION
 - Deduct 0.3 from score for EACH unrelated branch mentioned
 
 ### 2. Numerical Accuracy (CRITICAL)
@@ -83,6 +86,7 @@ class QAAgent:
         threshold: float = 0.75,
         supplementary_context: Optional[pd.DataFrame] = None,
         user_question: str = "",
+        sql: Optional[str] = None,
     ) -> Dict:
         """
         Evaluate a response for faithfulness.
@@ -93,6 +97,7 @@ class QAAgent:
             threshold: Minimum score to pass (from client YAML)
             supplementary_context: Benchmark data (top performers) that is also valid ground truth
             user_question: The user's original question (entities mentioned here are valid context)
+            sql: The SQL query that produced the data context (branch/entity filters are valid context)
 
         Returns:
             Dict with score (float), passed (bool), issues (list[str])
@@ -103,6 +108,20 @@ class QAAgent:
         else:
             data_str = "No structured data available."
 
+        # Include the SQL query so QA understands what filters were applied
+        # (e.g., branch names in WHERE clause are valid context even if not in result rows)
+        if sql:
+            data_str += (
+                f"\n\n### SQL Query (defines the data scope)\n```sql\n{sql}\n```"
+            )
+            # Extract branch/entity filters from SQL WHERE clause
+            where_branches = self._extract_where_entities(sql)
+            if where_branches:
+                data_str += (
+                    f"\nBranches/entities filtered in SQL WHERE clause (VALID context): "
+                    f"{', '.join(sorted(where_branches))}"
+                )
+
         # Include supplementary (benchmark) context as valid ground truth
         if supplementary_context is not None and len(supplementary_context) > 0:
             data_str += "\n\n### Benchmark Data (also valid ground truth)\n"
@@ -110,7 +129,16 @@ class QAAgent:
 
         # Include user question so QA knows which entities are valid context
         if user_question:
-            data_str += f"\n\n### User Question Context\nThe user asked: \"{user_question}\"\nBranch/entity names mentioned in the user's question are valid to reference in the response."
+            entities = self._extract_entities(user_question)
+            if entities:
+                entity_list = ", ".join(sorted(entities))
+            else:
+                entity_list = "(none)"
+            data_str += (
+                "\n\n### User Question Context\n"
+                f'The user asked: "{user_question}"\n'
+                f"Valid Entities from User Question: {entity_list}"
+            )
 
         prompt = EVAL_PROMPT.format(
             data_context=data_str,
@@ -119,10 +147,14 @@ class QAAgent:
         )
 
         try:
-            result = self.client.chat.completions.create(
+            result = chat_with_retry(
+                self.client,
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a strict QA evaluator. Return only valid JSON. Pay special attention to branch names and figures that appear in the response but NOT in the data context — these are hallucinations."},
+                    {
+                        "role": "system",
+                        "content": "You are a strict QA evaluator. Return only valid JSON. Pay special attention to branch names and figures that appear in the response but NOT in the data context — these are hallucinations.",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.1,
@@ -140,7 +172,11 @@ class QAAgent:
         except Exception as e:
             logger.error(f"QA evaluation failed: {e}")
             # On failure, pass with warning
-            return {"score": 0.5, "passed": True, "issues": [f"QA evaluation error: {str(e)}"]}
+            return {
+                "score": 0.5,
+                "passed": True,
+                "issues": [f"QA evaluation error: {str(e)}"],
+            }
 
     def _parse_response(self, raw: str, threshold: float) -> Dict:
         """Parse JSON response from QA LLM call."""
@@ -162,4 +198,82 @@ class QAAgent:
             }
         except (json.JSONDecodeError, ValueError) as e:
             logger.warning(f"Could not parse QA response: {e}. Raw: {raw[:200]}")
-            return {"score": 0.5, "passed": True, "issues": ["QA response parsing failed"]}
+            return {
+                "score": 0.5,
+                "passed": True,
+                "issues": ["QA response parsing failed"],
+            }
+
+    def _extract_where_entities(self, sql: str) -> List[str]:
+        """Extract branch/city entity names from SQL WHERE clause filters."""
+        if not sql:
+            return []
+        entities = set()
+        # Match patterns like: branch = 'Seattle', city = 'Toronto'
+        for match in re.finditer(
+            r"(?:branch|city|country)\s*=\s*'([^']+)'",
+            sql,
+            re.IGNORECASE,
+        ):
+            val = match.group(1).strip()
+            if val and len(val) > 1:
+                entities.add(val)
+        # Also handle IN ('val1', 'val2') patterns
+        for match in re.finditer(
+            r"(?:branch|city|country)\s+IN\s*\(([^)]+)\)",
+            sql,
+            re.IGNORECASE,
+        ):
+            for val in re.findall(r"'([^']+)'", match.group(1)):
+                if val and len(val) > 1:
+                    entities.add(val)
+        return list(entities)
+
+    def _extract_entities(self, text: str) -> List[str]:
+        """Extract likely branch/city entities from a user question."""
+        if not text:
+            return []
+
+        lowered = text.lower()
+        patterns = [
+            r"\bbranch\s+([a-z][a-z\s\-']{1,60})",
+            r"\bin\s+([a-z][a-z\s\-']{1,60})",
+            r"\bfor\s+the\s+([a-z][a-z\s\-']{1,60})\s+branch",
+        ]
+
+        stops = {
+            "the",
+            "a",
+            "an",
+            "my",
+            "our",
+            "this",
+            "that",
+            "these",
+            "those",
+            "branch",
+            "branches",
+            "revenue",
+            "sales",
+            "roi",
+            "profit",
+            "performance",
+        }
+
+        entities = set()
+        for pattern in patterns:
+            for match in re.findall(pattern, lowered):
+                candidate = match.strip(" .,!?:;\"'")
+                candidate = " ".join(candidate.split())
+                if not candidate:
+                    continue
+                if candidate in stops:
+                    continue
+                if any(word in stops for word in candidate.split()):
+                    candidate = " ".join(w for w in candidate.split() if w not in stops)
+                candidate = candidate.strip()
+                if len(candidate) < 2:
+                    continue
+                entities.add(candidate.title())
+
+        return list(entities)

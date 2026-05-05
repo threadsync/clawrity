@@ -118,7 +118,9 @@ class Orchestrator:
         qa_threshold = client_config.hallucination_threshold
         if supplementary_context is not None and len(supplementary_context) > 0:
             qa_threshold = min(qa_threshold, 0.5)
-            logger.info(f"Using relaxed QA threshold ({qa_threshold}) for enriched context")
+            logger.info(
+                f"Using relaxed QA threshold ({qa_threshold}) for enriched context"
+            )
 
         best_response = None
         best_score = 0.0
@@ -128,23 +130,23 @@ class Orchestrator:
         for attempt in range(MAX_RETRIES + 1):
             retry_issues = qa_result["issues"] if attempt > 0 else None
 
-            # On retry, add explicit data-only instruction to prevent hallucination
-            strict_data_instruction = None
-            if attempt > 0:
-                if supplementary_context is not None and len(supplementary_context) > 0:
-                    strict_data_instruction = (
-                        "CRITICAL: Only use data from the Data Context and Benchmark Data "
-                        "sections provided. Do NOT invent figures or branch names that are "
-                        "not present in either of those sections. You MAY reference benchmark "
-                        "branches for comparison and recommendations."
-                    )
-                else:
-                    strict_data_instruction = (
-                        "CRITICAL: Do NOT mention any branches, figures, or historical data "
-                        "that are not in the SQL query result provided. Stick strictly to the "
-                        "data. If historical context from RAG is about different branches than "
-                        "what the query returned, IGNORE that context entirely."
-                    )
+            # Always provide strict data grounding instruction to prevent
+            # the Gen Agent from hallucinating branch/figure data from RAG
+            # chunks that don't match the actual SQL query results.
+            if supplementary_context is not None and len(supplementary_context) > 0:
+                strict_data_instruction = (
+                    "CRITICAL: Only use data from the Data Context and Benchmark Data "
+                    "sections provided. Do NOT invent figures or branch names that are "
+                    "not present in either of those sections. You MAY reference benchmark "
+                    "branches for comparison and recommendations."
+                )
+            else:
+                strict_data_instruction = (
+                    "CRITICAL: Do NOT mention any branches, figures, or historical data "
+                    "that are not in the SQL query result provided. Stick strictly to the "
+                    "data. If historical context from RAG is about different branches than "
+                    "what the query returned, IGNORE that context entirely."
+                )
 
             response = self.gen_agent.generate(
                 question=message.text,
@@ -155,6 +157,7 @@ class Orchestrator:
                 retry_count=attempt,
                 strict_data_instruction=strict_data_instruction,
                 supplementary_context=supplementary_context,
+                sql=sql,
             )
 
             qa_result = self.qa_agent.evaluate(
@@ -163,6 +166,7 @@ class Orchestrator:
                 threshold=qa_threshold,
                 supplementary_context=supplementary_context,
                 user_question=message.text,
+                sql=sql,
             )
 
             # Track best response (prefer longer, richer responses over "no data" stubs)
@@ -256,7 +260,9 @@ class Orchestrator:
             top_performers = db.execute_query(enrichment_sql, (client_id,))
 
             if top_performers is not None and len(top_performers) > 0:
-                logger.info(f"Enrichment: fetched {len(top_performers)} top performer rows")
+                logger.info(
+                    f"Enrichment: fetched {len(top_performers)} top performer rows"
+                )
                 return top_performers
 
         except Exception as e:
@@ -273,6 +279,7 @@ class Orchestrator:
         """Log interaction for monitoring."""
         try:
             from rag.monitoring import log_interaction
+
             log_interaction(
                 client_id=client_config.client_id,
                 query=message.text,

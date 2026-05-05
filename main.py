@@ -7,11 +7,13 @@ starts Slack bot, and exposes REST endpoints.
 
 import asyncio
 import logging
+import traceback
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from agents.orchestrator import Orchestrator
@@ -48,20 +50,34 @@ async def lifespan(app: FastAPI):
     logger.info("=== Clawrity starting up ===")
 
     # 1. Init database schema
-    db = get_connector()
-    db.init_schema()
-    logger.info("Database schema ready")
+    try:
+        db = get_connector()
+        db.init_schema()
+        logger.info("Database schema ready")
+    except Exception as e:
+        logger.error(f"Database init failed: {e}")
+        logger.warning("Starting in degraded mode — database unavailable")
 
     # 2. Load client configs
-    client_configs = load_client_configs()
-    logger.info(f"Loaded {len(client_configs)} client(s): {list(client_configs.keys())}")
+    try:
+        client_configs = load_client_configs()
+        logger.info(
+            f"Loaded {len(client_configs)} client(s): {list(client_configs.keys())}"
+        )
+    except Exception as e:
+        logger.error(f"Client config loading failed: {e}")
+        client_configs = {}
 
     # 3. Init orchestrator
-    orchestrator = Orchestrator()
+    try:
+        orchestrator = Orchestrator()
+    except Exception as e:
+        logger.error(f"Orchestrator init failed: {e}")
 
     # 4. Try to attach RAG retriever
     try:
         from rag.retriever import Retriever
+
         retriever = Retriever()
         orchestrator.set_retriever(retriever)
         logger.info("RAG retriever attached to orchestrator")
@@ -69,15 +85,22 @@ async def lifespan(app: FastAPI):
         logger.info(f"RAG retriever not available (Phase 2): {e}")
 
     # 5. Init protocol adapter
-    protocol_adapter = ProtocolAdapter(client_configs)
+    try:
+        protocol_adapter = ProtocolAdapter(client_configs)
+    except Exception as e:
+        logger.error(f"Protocol adapter init failed: {e}")
 
     # 6. Start Slack bot
-    slack_handler = SlackHandler(protocol_adapter, client_configs, orchestrator)
-    slack_handler.start()
+    try:
+        slack_handler = SlackHandler(protocol_adapter, client_configs, orchestrator)
+        slack_handler.start()
+    except Exception as e:
+        logger.warning(f"Slack bot not started: {e}")
 
     # 7. Start scheduler
     try:
         from heartbeat.scheduler import start_scheduler
+
         scheduler = start_scheduler(client_configs, orchestrator)
         logger.info("HEARTBEAT scheduler started")
     except Exception as e:
@@ -89,11 +112,20 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     logger.info("=== Clawrity shutting down ===")
-    if slack_handler:
-        slack_handler.stop()
-    if scheduler:
-        scheduler.shutdown(wait=False)
-    db.close()
+    try:
+        if slack_handler:
+            slack_handler.stop()
+    except Exception as e:
+        logger.warning(f"Slack handler stop error: {e}")
+    try:
+        if scheduler:
+            scheduler.shutdown(wait=False)
+    except Exception as e:
+        logger.warning(f"Scheduler stop error: {e}")
+    try:
+        db.close()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +145,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all exception handler to prevent process crashes."""
+    logger.error(
+        f"Unhandled exception on {request.method} {request.url.path}: {exc}\n"
+        f"{traceback.format_exc()}"
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "detail": str(exc),
+            "path": str(request.url.path),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -157,11 +206,18 @@ class ClientRequest(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """Send a message and get an AI response."""
     if request.client_id not in client_configs:
-        raise HTTPException(status_code=404, detail=f"Client not found: {request.client_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Client not found: {request.client_id}"
+        )
+    if not orchestrator or not protocol_adapter:
+        raise HTTPException(
+            status_code=503, detail="Service not fully initialized. Check /health."
+        )
 
     config = client_configs[request.client_id]
     message = protocol_adapter.normalise_api(request.client_id, request.message)
@@ -174,7 +230,9 @@ async def chat(request: ChatRequest):
 async def compare(request: CompareRequest):
     """Side-by-side comparison: with RAG vs without RAG."""
     if request.client_id not in client_configs:
-        raise HTTPException(status_code=404, detail=f"Client not found: {request.client_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Client not found: {request.client_id}"
+        )
 
     config = client_configs[request.client_id]
     message = protocol_adapter.normalise_api(request.client_id, request.message)
@@ -198,17 +256,23 @@ async def compare(request: CompareRequest):
 async def scout(request: ScoutRequest):
     """Run a targeted scout search for competitor/market intelligence."""
     if request.client_id not in client_configs:
-        raise HTTPException(status_code=404, detail=f"Client not found: {request.client_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Client not found: {request.client_id}"
+        )
 
     config = client_configs[request.client_id]
 
     try:
         from agents.scout_agent import ScoutAgent
+
         scout_agent = ScoutAgent()
         result = await scout_agent.search_query(config, request.query)
 
         if result is None:
-            return {"response": "No relevant competitor or market news found for this query.", "has_results": False}
+            return {
+                "response": "No relevant competitor or market news found for this query.",
+                "has_results": False,
+            }
 
         return {"response": result, "has_results": True}
     except Exception as e:
@@ -220,17 +284,23 @@ async def scout(request: ScoutRequest):
 async def scout_digest(request: ClientRequest):
     """Run full scout agent digest for a client."""
     if request.client_id not in client_configs:
-        raise HTTPException(status_code=404, detail=f"Client not found: {request.client_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Client not found: {request.client_id}"
+        )
 
     config = client_configs[request.client_id]
 
     try:
         from agents.scout_agent import ScoutAgent
+
         scout_agent = ScoutAgent()
         result = await scout_agent.gather_intelligence(config)
 
         if result is None:
-            return {"response": "No relevant market intelligence found.", "has_results": False}
+            return {
+                "response": "No relevant market intelligence found.",
+                "has_results": False,
+            }
 
         return {"response": result, "has_results": True}
     except Exception as e:
@@ -242,16 +312,21 @@ async def scout_digest(request: ClientRequest):
 async def trigger_digest(request: ClientRequest):
     """Manually trigger the daily digest pipeline (same as scheduled job)."""
     if request.client_id not in client_configs:
-        raise HTTPException(status_code=404, detail=f"Client not found: {request.client_id}")
+        raise HTTPException(
+            status_code=404, detail=f"Client not found: {request.client_id}"
+        )
 
     config = client_configs[request.client_id]
 
     try:
         from heartbeat.scheduler import run_digest
+
         digest_text = await run_digest(config, orchestrator)
 
         if digest_text is None:
-            raise HTTPException(status_code=500, detail="Digest generation failed after all retries")
+            raise HTTPException(
+                status_code=500, detail="Digest generation failed after all retries"
+            )
 
         return {"response": digest_text, "status": "success"}
     except HTTPException:
@@ -269,6 +344,7 @@ async def admin_stats(client_id: str):
 
     try:
         from rag.monitoring import get_stats
+
         return get_stats(client_id)
     except Exception as e:
         return {"error": str(e), "message": "Monitoring not yet configured"}
@@ -282,6 +358,7 @@ async def run_forecast(client_id: str):
 
     try:
         from forecasting.prophet_engine import ProphetEngine
+
         engine = ProphetEngine()
         results = engine.train_and_forecast(client_id)
         return {"status": "success", "branches_forecast": len(results)}
@@ -297,10 +374,13 @@ async def get_forecast(client_id: str, branch: str):
 
     try:
         from forecasting.prophet_engine import ProphetEngine
+
         engine = ProphetEngine()
         forecast = engine.get_cached_forecast(client_id, branch)
         if not forecast:
-            raise HTTPException(status_code=404, detail=f"No forecast found for {branch}")
+            raise HTTPException(
+                status_code=404, detail=f"No forecast found for {branch}"
+            )
         return forecast
     except HTTPException:
         raise
@@ -320,7 +400,7 @@ async def health():
         pass
 
     scheduled_jobs = []
-    if scheduler and hasattr(scheduler, 'get_jobs'):
+    if scheduler and hasattr(scheduler, "get_jobs"):
         try:
             scheduled_jobs = [
                 {"id": job.id, "name": job.name, "next_run": str(job.next_run_time)}
@@ -333,7 +413,9 @@ async def health():
         "status": "healthy" if db_connected else "degraded",
         "database": "connected" if db_connected else "disconnected",
         "clients": list(client_configs.keys()),
-        "scheduler_running": scheduler is not None and scheduler.running if scheduler else False,
+        "scheduler_running": scheduler is not None and scheduler.running
+        if scheduler
+        else False,
         "scheduled_jobs": scheduled_jobs,
         "slack_active": slack_handler is not None and slack_handler._thread is not None,
     }
@@ -342,4 +424,6 @@ async def health():
 @app.post("/slack/events")
 async def slack_events():
     """Slack webhook endpoint (HTTP mode fallback). Socket Mode is primary."""
-    return {"message": "Slack events are handled via Socket Mode. This endpoint is a fallback."}
+    return {
+        "message": "Slack events are handled via Socket Mode. This endpoint is a fallback."
+    }

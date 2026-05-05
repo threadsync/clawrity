@@ -11,10 +11,10 @@ Auto-detects provider from settings:
 """
 
 import logging
+import time
 from functools import lru_cache
 
-from openai import OpenAI
-
+from openai import OpenAI, RateLimitError, APIStatusError
 from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,9 @@ _PROVIDERS = {
         "default_model": "llama-3.3-70b-versatile",
     },
 }
+
+MAX_RETRIES = 4
+BASE_DELAY = 1.0  # seconds
 
 
 def get_llm_client() -> OpenAI:
@@ -54,10 +57,51 @@ def get_llm_client() -> OpenAI:
     client = OpenAI(
         api_key=api_key,
         base_url=config["base_url"],
+        max_retries=0,  # We handle retries ourselves for better control
     )
 
     logger.info(f"LLM client: {provider} ({config['base_url']})")
     return client
+
+
+def chat_with_retry(client: OpenAI, **kwargs):
+    """
+    Call client.chat.completions.create with exponential backoff on 429 errors.
+
+    Args:
+        client: OpenAI client instance
+        **kwargs: Arguments passed to chat.completions.create
+
+    Returns:
+        The completion response
+
+    Raises:
+        RateLimitError: After all retries exhausted
+        APIStatusError: For non-429 API errors
+    """
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except RateLimitError as e:
+            if attempt == MAX_RETRIES:
+                logger.error(f"Rate limit: all {MAX_RETRIES} retries exhausted")
+                raise
+            delay = BASE_DELAY * (2**attempt)
+            logger.warning(
+                f"Rate limited (429), retrying in {delay:.1f}s "
+                f"(attempt {attempt + 1}/{MAX_RETRIES})"
+            )
+            time.sleep(delay)
+        except APIStatusError as e:
+            if e.status_code == 429 and attempt < MAX_RETRIES:
+                delay = BASE_DELAY * (2**attempt)
+                logger.warning(
+                    f"Rate limited (429), retrying in {delay:.1f}s "
+                    f"(attempt {attempt + 1}/{MAX_RETRIES})"
+                )
+                time.sleep(delay)
+            else:
+                raise
 
 
 def get_model_name() -> str:

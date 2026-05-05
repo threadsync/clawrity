@@ -12,7 +12,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 
-from config.llm_client import get_llm_client, get_model_name
+from config.llm_client import get_llm_client, get_model_name, chat_with_retry
 from config.client_loader import ClientConfig
 from config.settings import get_settings
 from skills.web_search import web_search
@@ -99,8 +99,7 @@ class ScoutAgent:
 
         # Format results for LLM
         results_text = "\n\n".join(
-            f"**{r['title']}** ({r['url']})\n{r['content']}"
-            for r in all_results
+            f"**{r['title']}** ({r['url']})\n{r['content']}" for r in all_results
         )
 
         # Summarize with Groq
@@ -113,10 +112,14 @@ class ScoutAgent:
         )
 
         try:
-            response = self.client.chat.completions.create(
+            response = chat_with_retry(
+                self.client,
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a business intelligence scout."},
+                    {
+                        "role": "system",
+                        "content": "You are a business intelligence scout.",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,
@@ -126,11 +129,15 @@ class ScoutAgent:
             result = response.choices[0].message.content.strip()
 
             if result == "NO_RELEVANT_NEWS":
-                logger.info(f"[{client_config.client_id}] Scout: no relevant news found")
+                logger.info(
+                    f"[{client_config.client_id}] Scout: no relevant news found"
+                )
                 return None
 
             section = f"## 🔭 Market Intelligence\n\n{result}"
-            logger.info(f"[{client_config.client_id}] Scout: generated intelligence section")
+            logger.info(
+                f"[{client_config.client_id}] Scout: generated intelligence section"
+            )
             return section
 
         except Exception as e:
@@ -157,12 +164,18 @@ class ScoutAgent:
         scout_config = client_config.scout
 
         # Search with the user's query directly
-        results = web_search(query, max_results=5, lookback_days=scout_config.news_lookback_days)
+        results = web_search(
+            query, max_results=5, lookback_days=scout_config.news_lookback_days
+        )
 
         # Also search with competitor names if they appear in the query
         for competitor in scout_config.competitors:
             if competitor.lower() in query.lower():
-                extra = web_search(f"{competitor} latest news", max_results=3, lookback_days=scout_config.news_lookback_days)
+                extra = web_search(
+                    f"{competitor} latest news",
+                    max_results=3,
+                    lookback_days=scout_config.news_lookback_days,
+                )
                 results.extend(extra)
 
         if not results:
@@ -179,8 +192,7 @@ class ScoutAgent:
 
         # Format results for LLM
         results_text = "\n\n".join(
-            f"**{r['title']}** ({r['url']})\n{r['content']}"
-            for r in unique_results
+            f"**{r['title']}** ({r['url']})\n{r['content']}" for r in unique_results
         )
 
         prompt = QUERY_PROMPT.format(
@@ -192,10 +204,14 @@ class ScoutAgent:
         )
 
         try:
-            response = self.client.chat.completions.create(
+            response = chat_with_retry(
+                self.client,
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a business intelligence scout."},
+                    {
+                        "role": "system",
+                        "content": "You are a business intelligence scout.",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.3,

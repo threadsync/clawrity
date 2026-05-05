@@ -10,14 +10,14 @@ import re
 import logging
 from typing import Optional
 
-from config.llm_client import get_llm_client, get_model_name
+from config.llm_client import get_llm_client, get_model_name, chat_with_retry
 
 logger = logging.getLogger(__name__)
 
 # Dangerous SQL patterns — reject anything that isn't a SELECT
 UNSAFE_PATTERNS = re.compile(
     r"\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|GRANT|REVOKE|EXEC)\b",
-    re.IGNORECASE
+    re.IGNORECASE,
 )
 
 SYSTEM_PROMPT = """You are a PostgreSQL SQL generator. Generate ONLY a valid SELECT query.
@@ -90,7 +90,8 @@ class NLToSQL:
         )
 
         try:
-            response = self.client.chat.completions.create(
+            response = chat_with_retry(
+                self.client,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system},

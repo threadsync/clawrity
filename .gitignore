@@ -1,8 +1,10 @@
 # === Environment & Secrets ===
 .env
 *.env
+.env.local
+.env.production
 
-# === Dataset files — never commit raw or processed data ===
+# === Dataset files ===
 data/raw/
 data/processed/
 
@@ -12,24 +14,34 @@ __pycache__/
 *$py.class
 *.so
 *.egg-info/
+*.egg
 dist/
 build/
-*.egg
+eggs/
+*.whl
+pip-log.txt
+pip-delete-this-directory.txt
 
 # === Virtual Environment ===
 venv/
 .venv/
 env/
+ENV/
 
 # === IDE ===
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+.project
+.settings/
 
 # === OS ===
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
 # === Logs ===
 logs/
@@ -39,5 +51,25 @@ logs/
 # === Docker ===
 pg_data/
 
-# === Model Cache ===
+# === Model / Embedding Cache ===
 .cache/
+.cache/huggingface/
+.cache/torch/
+
+# === Ruff ===
+.ruff_cache/
+
+# === Jupyter ===
+.ipynb_checkpoints/
+*.ipynb
+
+# === Testing ===
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# === Misc ===
+codebase_structure.txt
+*.bak
+*.tmp

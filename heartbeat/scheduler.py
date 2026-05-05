@@ -125,6 +125,7 @@ async def run_digest(
         scout_section = None
         try:
             from agents.scout_agent import ScoutAgent
+
             scout = ScoutAgent()
             scout_section = await scout.gather_intelligence(client_config)
         except Exception as e:
@@ -140,25 +141,36 @@ async def run_digest(
 
         # Step 5: Push to Slack webhook
         webhook_url = client_config.channels.get("slack_webhook", "")
-        if webhook_url:
+        if webhook_url and webhook_url.startswith(("http://", "https://")):
             await _push_to_slack(webhook_url, full_digest)
+        elif webhook_url:
+            logger.warning(
+                f"[{client_id}] Slack webhook URL is malformed (missing http/https protocol): "
+                f"{webhook_url[:50]}..."
+            )
         else:
             logger.warning(f"[{client_id}] No Slack webhook configured")
 
         # Step 6: Log success to JSONL
-        _log_digest_event(client_id, "success", {
-            "qa_score": qa_result["score"],
-            "qa_passed": qa_result["passed"],
-            "scout_included": scout_section is not None,
-            "digest_length": len(full_digest),
-        })
+        _log_digest_event(
+            client_id,
+            "success",
+            {
+                "qa_score": qa_result["score"],
+                "qa_passed": qa_result["passed"],
+                "scout_included": scout_section is not None,
+                "digest_length": len(full_digest),
+            },
+        )
 
         logger.info(f"[{client_id}] Digest completed successfully")
         return full_digest
 
     except Exception as e:
         logger.error(f"[{client_id}] Digest failed: {e}", exc_info=True)
-        _log_digest_event(client_id, "failure", {"error": str(e), "attempt": retry_count + 1})
+        _log_digest_event(
+            client_id, "failure", {"error": str(e), "attempt": retry_count + 1}
+        )
 
         heartbeat = load_heartbeat(client_config)
 
@@ -171,19 +183,25 @@ async def run_digest(
             await asyncio.sleep(delay_minutes * 60)
             return await run_digest(client_config, orchestrator, retry_count + 1)
         else:
-            logger.error(f"[{client_id}] Digest failed after {heartbeat.max_retries + 1} attempts")
+            logger.error(
+                f"[{client_id}] Digest failed after {heartbeat.max_retries + 1} attempts"
+            )
             # Post failure notification to Slack
             webhook_url = client_config.channels.get("slack_webhook", "")
-            if webhook_url:
+            if webhook_url and webhook_url.startswith(("http://", "https://")):
                 await _push_to_slack(
-                    webhook_url,
-                    "Clawrity digest unavailable. Backend may be offline."
+                    webhook_url, "Clawrity digest unavailable. Backend may be offline."
                 )
             return None
 
 
 async def _push_to_slack(webhook_url: str, message: str):
     """Push a message to a Slack incoming webhook."""
+    if not webhook_url or not webhook_url.startswith(("http://", "https://")):
+        logger.error(
+            f"Invalid Slack webhook URL: {webhook_url[:50] if webhook_url else '(empty)'}"
+        )
+        return
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -194,7 +212,9 @@ async def _push_to_slack(webhook_url: str, message: str):
             if response.status_code == 200:
                 logger.info("Digest pushed to Slack successfully")
             else:
-                logger.error(f"Slack webhook returned {response.status_code}: {response.text}")
+                logger.error(
+                    f"Slack webhook returned {response.status_code}: {response.text}"
+                )
     except Exception as e:
         logger.error(f"Failed to push digest to Slack: {e}")
 
@@ -252,8 +272,7 @@ def start_scheduler(
             replace_existing=True,
         )
         logger.info(
-            f"Scheduled digest for {client_id}: "
-            f"{heartbeat.time} {heartbeat.timezone}"
+            f"Scheduled digest for {client_id}: {heartbeat.time} {heartbeat.timezone}"
         )
 
         # ETL sync at 02:00 (placeholder)
@@ -290,6 +309,7 @@ async def _rag_reindex_placeholder(client_id: str):
     logger.info(f"[{client_id}] RAG re-index triggered (placeholder)")
     try:
         from scripts.run_rag_pipeline import run_pipeline
+
         run_pipeline(client_id)
     except Exception as e:
         logger.warning(f"RAG re-index failed: {e}")
