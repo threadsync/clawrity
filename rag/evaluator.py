@@ -1,9 +1,9 @@
 """
 Clawrity — RAG Evaluator
 
-Lightweight Groq-based evaluation (no OpenAI, no full RAGAs).
+Lightweight evaluation using the unified LLM client (supports Groq, NVIDIA, Xiaomi, Mistral).
 Four metrics: faithfulness, answer_relevancy, context_precision, context_recall.
-Single Groq call with structured JSON output.
+Single LLM call with structured JSON output.
 """
 
 import json
@@ -11,9 +11,8 @@ import logging
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
-from groq import Groq
-
 from config.settings import get_settings
+from config.llm_client import get_llm_client, get_model_name, chat_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +56,11 @@ class EvalResult:
 
 
 class RAGEvaluator:
-    """Evaluates RAG pipeline quality using Groq LLM."""
+    """Evaluates RAG pipeline quality using the configured LLM provider."""
 
     def __init__(self):
-        settings = get_settings()
-        self.client = Groq(api_key=settings.groq_api_key)
-        self.model = settings.llm_model
+        self.client = get_llm_client()
+        self.model = get_model_name()
 
     def evaluate(
         self,
@@ -71,10 +69,14 @@ class RAGEvaluator:
         response: str,
     ) -> EvalResult:
         """Evaluate a RAG response."""
-        chunks_text = "\n".join(
-            f"{i+1}. {c.get('text', '')} (similarity: {c.get('similarity', 0):.2f})"
-            for i, c in enumerate(chunks)
-        ) if chunks else "No chunks retrieved."
+        chunks_text = (
+            "\n".join(
+                f"{i + 1}. {c.get('text', '')} (similarity: {c.get('similarity', 0):.2f})"
+                for i, c in enumerate(chunks)
+            )
+            if chunks
+            else "No chunks retrieved."
+        )
 
         prompt = EVAL_PROMPT.format(
             query=query,
@@ -83,10 +85,14 @@ class RAGEvaluator:
         )
 
         try:
-            result = self.client.chat.completions.create(
+            result = chat_with_retry(
+                self.client,
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You are a RAG evaluation expert. Return only valid JSON."},
+                    {
+                        "role": "system",
+                        "content": "You are a RAG evaluation expert. Return only valid JSON.",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.1,

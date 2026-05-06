@@ -14,7 +14,7 @@ from typing import Optional, List, Dict
 
 import pandas as pd
 
-from config.llm_client import get_llm_client, get_model_name, chat_with_retry
+from config.llm_client import get_llm_client, get_fast_model_name, chat_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,9 @@ class QAAgent:
 
     def __init__(self):
         self.client = get_llm_client()
-        self.model = get_model_name()
+        self.model = get_fast_model_name()
+        # Cache: hash(response) -> evaluation result
+        self._cache: Dict[str, Dict] = {}
 
     def evaluate(
         self,
@@ -102,6 +104,12 @@ class QAAgent:
         Returns:
             Dict with score (float), passed (bool), issues (list[str])
         """
+        # Cache check: skip LLM call if we already evaluated this exact response
+        cache_key = str(hash(response))
+        if cache_key in self._cache:
+            logger.info("QA cache hit — skipping LLM call")
+            return self._cache[cache_key]
+
         data_str = ""
         if data_context is not None and len(data_context) > 0:
             data_str = data_context.to_markdown(index=False)
@@ -167,6 +175,7 @@ class QAAgent:
                 f"QA evaluation: score={evaluation['score']:.2f}, "
                 f"passed={evaluation['passed']}, issues={len(evaluation['issues'])}"
             )
+            self._cache[cache_key] = evaluation
             return evaluation
 
         except Exception as e:
@@ -179,7 +188,7 @@ class QAAgent:
             }
 
     def _parse_response(self, raw: str, threshold: float) -> Dict:
-        """Parse JSON response from QA LLM call."""
+        """Parse JSON response from QA LLM call. Handles truncated/malformed JSON."""
         try:
             # Strip markdown code fences if present
             cleaned = raw.strip()
@@ -197,12 +206,36 @@ class QAAgent:
                 "issues": data.get("issues", []),
             }
         except (json.JSONDecodeError, ValueError) as e:
-            logger.warning(f"Could not parse QA response: {e}. Raw: {raw[:200]}")
+            logger.warning(f"Could not parse QA response: {e}. Raw: {raw[:300]}")
+            # Fallback: try to extract score from truncated/malformed JSON
+            score = self._extract_score_fallback(raw)
+            if score is not None:
+                logger.info(
+                    f"Fallback: extracted score={score} from malformed response"
+                )
+                return {
+                    "score": score,
+                    "passed": score >= threshold,
+                    "issues": ["QA response parsing failed (partial extraction)"],
+                }
             return {
                 "score": 0.5,
                 "passed": True,
                 "issues": ["QA response parsing failed"],
             }
+
+    def _extract_score_fallback(self, raw: str) -> Optional[float]:
+        """Extract score from malformed/truncated JSON using regex."""
+        # Try to find "score": 0.8 pattern
+        match = re.search(r'"score"\s*:\s*(\d+(?:\.\d+)?)', raw)
+        if match:
+            try:
+                score = float(match.group(1))
+                if 0.0 <= score <= 1.0:
+                    return score
+            except ValueError:
+                pass
+        return None
 
     def _extract_where_entities(self, sql: str) -> List[str]:
         """Extract branch/city entity names from SQL WHERE clause filters."""

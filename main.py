@@ -91,11 +91,16 @@ async def lifespan(app: FastAPI):
         logger.error(f"Protocol adapter init failed: {e}")
 
     # 6. Start Slack bot
-    try:
-        slack_handler = SlackHandler(protocol_adapter, client_configs, orchestrator)
-        slack_handler.start()
-    except Exception as e:
-        logger.warning(f"Slack bot not started: {e}")
+    if orchestrator and protocol_adapter:
+        try:
+            slack_handler = SlackHandler(protocol_adapter, client_configs, orchestrator)
+            slack_handler.start()
+        except Exception as e:
+            logger.warning(f"Slack bot not started: {e}")
+    else:
+        logger.warning(
+            "Slack bot not started — orchestrator or protocol adapter missing"
+        )
 
     # 7. Start scheduler
     try:

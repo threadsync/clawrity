@@ -6,6 +6,9 @@ services:
     environment:
       - DATABASE_URL=postgresql://user:pass@postgres:5432/clawrity
       - GROQ_API_KEY=${GROQ_API_KEY}
+      - XIAOMI_API_KEY=${XIAOMI_API_KEY}
+      - XIAOMI_BASE_URL=${XIAOMI_BASE_URL}
+      - XIAOMI_REGION=${XIAOMI_REGION}
       - SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN}
       - SLACK_APP_TOKEN=${SLACK_APP_TOKEN}
       - SLACK_SIGNING_SECRET=${SLACK_SIGNING_SECRET}

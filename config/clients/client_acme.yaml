@@ -29,6 +29,10 @@ column_mapping:
   Sales: revenue
   Profit: profit
 
+# Slack workspace/team IDs that map to this client.
+# Get your workspace ID: Slack API → auth.test → team_id
+slack_workspace_ids: []
+
 scout:
   sector: "global retail"
   competitors: ["IKEA", "Amazon", "Walmart", "Staples"]

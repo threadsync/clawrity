@@ -10,7 +10,7 @@ import re
 import logging
 from typing import Optional
 
-from config.llm_client import get_llm_client, get_model_name, chat_with_retry
+from config.llm_client import get_llm_client, get_fast_model_name, chat_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class NLToSQL:
 
     def __init__(self):
         self.client = get_llm_client()
-        self.model = get_model_name()
+        self.model = get_fast_model_name()
 
     def generate_sql(
         self,

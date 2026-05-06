@@ -15,7 +15,6 @@ See README.md for detailed Slack app setup instructions.
 =======================
 """
 
-import asyncio
 import logging
 import threading
 import time
@@ -33,6 +32,9 @@ _executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="clawrity-slack
 
 # Module-level reference to prevent multiple handlers
 _active_handler = None
+
+# How long to wait for a user lock before giving up (seconds)
+_USER_LOCK_TIMEOUT = 30
 
 
 class SlackHandler:
@@ -66,9 +68,9 @@ class SlackHandler:
 
         # Per-user processing lock: prevents duplicate responses when
         # Slack delivers the same event multiple times before dedup catches it.
-        # Only one message per user is processed at a time.
-        self._busy_users: Set[str] = set()
-        self._busy_lock = threading.Lock()
+        # Uses per-user Locks with timeout so messages wait instead of being dropped.
+        self._user_locks: Dict[str, threading.Lock] = {}
+        self._user_locks_lock = threading.Lock()
 
     def _validate_tokens(self) -> bool:
         """Check that all required Slack tokens are configured."""
@@ -115,20 +117,30 @@ class SlackHandler:
     def _acquire_user(self, user_id: str) -> bool:
         """
         Try to acquire the per-user processing lock.
-        Returns True if acquired (caller should process), False if already busy.
+        Waits up to _USER_LOCK_TIMEOUT seconds instead of silently dropping.
+        Returns True if acquired (caller should process), False if timed out.
         """
-        with self._busy_lock:
-            if user_id in self._busy_users:
-                logger.info(f"DEDUP: User {user_id} already being processed, skipping")
-                return False
-            self._busy_users.add(user_id)
+        with self._user_locks_lock:
+            if user_id not in self._user_locks:
+                self._user_locks[user_id] = threading.Lock()
+            lock = self._user_locks[user_id]
+
+        acquired = lock.acquire(timeout=_USER_LOCK_TIMEOUT)
+        if acquired:
             logger.info(f"DEDUP: Acquired user {user_id}")
-            return True
+        else:
+            logger.warning(
+                f"DEDUP: Timed out waiting for user {user_id} "
+                f"after {_USER_LOCK_TIMEOUT}s — previous query still processing"
+            )
+        return acquired
 
     def _release_user(self, user_id: str):
         """Release the per-user processing lock."""
-        with self._busy_lock:
-            self._busy_users.discard(user_id)
+        with self._user_locks_lock:
+            lock = self._user_locks.get(user_id)
+        if lock and lock.locked():
+            lock.release()
             logger.info(f"DEDUP: Released user {user_id}")
 
     def _setup_app(self):
@@ -163,6 +175,9 @@ class SlackHandler:
             if self._is_duplicate(event):
                 return
             if not self._acquire_user(user_id):
+                say(
+                    "⏳ I'm still processing your previous request. Please wait a moment and try again."
+                )
                 return
             logger.info(f"[app_mention] Submitting to thread pool for user={user_id}")
             _executor.submit(self._handle_event_safe, event, say, context)
@@ -192,6 +207,9 @@ class SlackHandler:
             if self._is_duplicate(event):
                 return
             if not self._acquire_user(user_id):
+                say(
+                    "⏳ I'm still processing your previous request. Please wait a moment and try again."
+                )
                 return
             logger.info(f"[message/DM] Submitting to thread pool for user={user_id}")
             _executor.submit(self._handle_event_safe, event, say, context)
@@ -227,7 +245,15 @@ class SlackHandler:
 
     def _handle_event(self, event: dict, say, context):
         """Process an incoming Slack event (runs in background thread)."""
-        team_id = context.get("team_id", None) if context else None
+        # Extract team_id from context or event — Socket Mode may not always
+        # populate context["team_id"], so fall back to event["team"].
+        team_id = None
+        if context:
+            team_id = context.get("team_id") or context.get("team")
+        if not team_id:
+            team_id = event.get("team")
+        logger.info(f"[handle_event] team_id={team_id}")
+
         message = self.adapter.normalise_slack(event, team_id=team_id)
         logger.info(
             f"[handle_event] normalised: client_id={message.client_id} "
@@ -248,11 +274,8 @@ class SlackHandler:
             return
 
         logger.info("[handle_event] calling orchestrator...")
-        loop = asyncio.new_event_loop()
         try:
-            result = loop.run_until_complete(
-                self.orchestrator.process(message, client_config)
-            )
+            result = self.orchestrator.process_sync(message, client_config)
             response_text = result.get("response", "")
             if not response_text:
                 response_text = "I wasn't able to generate a response. Please try rephrasing your question."
@@ -284,8 +307,6 @@ class SlackHandler:
                 say(error_msg)
             except Exception as say_err:
                 logger.error(f"Failed to send error message to Slack: {say_err}")
-        finally:
-            loop.close()
 
     def start(self):
         """Start the Slack bot in a background thread."""

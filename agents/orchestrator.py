@@ -11,6 +11,7 @@ asks for recommendations, automatically pulls top-performing branches as compari
 context so the Gen Agent can give actionable suggestions.
 """
 
+import asyncio
 import re
 import logging
 import time
@@ -57,7 +58,21 @@ class Orchestrator:
         client_config: ClientConfig,
     ) -> Dict:
         """
-        Process a user message through the full pipeline.
+        Process a user message through the full pipeline (async version for API endpoints).
+        Runs the synchronous pipeline in a thread pool so it doesn't block the event loop.
+
+        Returns:
+            Dict with: response, qa_score, qa_passed, retries, metadata
+        """
+        return await asyncio.to_thread(self.process_sync, message, client_config)
+
+    def process_sync(
+        self,
+        message: NormalisedMessage,
+        client_config: ClientConfig,
+    ) -> Dict:
+        """
+        Process a user message through the full pipeline (synchronous version).
 
         Returns:
             Dict with: response, qa_score, qa_passed, retries, metadata

@@ -24,6 +24,9 @@ Fill in `.env`:
 
 ```env
 GROQ_API_KEY=gsk_...
+XIAOMI_API_KEY=your-xiaomi-api-key
+XIAOMI_BASE_URL=https://api.xiaomi.com/v1
+XIAOMI_REGION=sg
 DATABASE_URL=postgresql://user:pass@localhost:5432/clawrity
 TAVILY_API_KEY=tvly-...
 SLACK_BOT_TOKEN=xoxb-...

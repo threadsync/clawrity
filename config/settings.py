@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     # --- LLM Providers ---
     groq_api_key: str = ""
     nvidia_api_key: str = ""
+    xiaomi_api_key: str = ""
+    xiaomi_base_url: str = "https://api.xiaomi.com/v1"
+    xiaomi_region: str = "sg"
+    mistral_api_key: str = ""
+
+    # --- Ollama (local LLM — no API key needed) ---
+    ollama_base_url: str = "http://localhost:11434/v1"
+    ollama_model: str = "llama3.1:8b"
 
     # --- Slack (Socket Mode) ---
     # Bot Token (xoxb-...) — OAuth & Permissions → Install to Workspace
@@ -44,20 +52,41 @@ class Settings(BaseSettings):
 
     # --- Model Defaults ---
     llm_model: str = "meta/llama-3.3-70b-instruct"
-    llm_provider: str = ""  # auto-detected: "nvidia" or "groq"
+    llm_provider: str = ""  # auto-detected: "ollama", "nvidia", "groq", "xiaomi", or "mistral"
     embedding_model: str = "all-MiniLM-L6-v2"
     embedding_dim: int = 384
 
     @property
     def active_llm_provider(self) -> str:
-        """Auto-detect which LLM provider to use based on available keys."""
+        """Auto-detect which LLM provider to use based on available keys.
+        Priority: explicit setting > ollama > mistral > xiaomi > nvidia > groq."""
         if self.llm_provider:
             return self.llm_provider
+        # Prefer Ollama if available (local, fast, no rate limits)
+        if self._ollama_available():
+            return "ollama"
+        if self.mistral_api_key:
+            return "mistral"
+        if self.xiaomi_api_key:
+            return "xiaomi"
         if self.nvidia_api_key:
             return "nvidia"
         if self.groq_api_key:
             return "groq"
-        return "nvidia"  # default
+        return "ollama"  # default to ollama (user can install it)
+
+    def _ollama_available(self) -> bool:
+        """Quick check if Ollama is likely running locally."""
+        try:
+            import urllib.request
+            req = urllib.request.Request(
+                f"{self.ollama_base_url.rstrip('/').replace('/v1', '')}/api/tags",
+                method="GET",
+            )
+            with urllib.request.urlopen(req, timeout=1) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
 
     model_config = {
         "env_file": ".env",
