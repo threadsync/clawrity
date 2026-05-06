@@ -275,6 +275,24 @@ def start_scheduler(
             f"Scheduled digest for {client_id}: {heartbeat.time} {heartbeat.timezone}"
         )
 
+        # Daily Scout Digest — every day at 09:00
+        scheduler.add_job(
+            run_daily_scout,
+            CronTrigger(
+                day_of_week="mon-sun",
+                hour=9,
+                minute=0,
+                timezone=heartbeat.timezone,
+            ),
+            args=[config],
+            id=f"daily_scout_{client_id}",
+            name=f"Daily Scout Digest — {config.client_name}",
+            replace_existing=True,
+        )
+        logger.info(
+            f"Scheduled daily scout for {client_id}: Every day 09:00 {heartbeat.timezone}"
+        )
+
         # ETL sync at 02:00 (placeholder)
         scheduler.add_job(
             _etl_sync_placeholder,
@@ -297,6 +315,85 @@ def start_scheduler(
 
     scheduler.start()
     return scheduler
+
+
+async def run_daily_scout(client_config: ClientConfig) -> Optional[str]:
+    """
+    Daily competitor & sector intelligence digest.
+    Runs every day at 09:00. Searches for the past day's news
+    about competitors and sector trends, then pushes to Slack.
+
+    Returns:
+        Full scout digest text if successful, None on failure
+    """
+    client_id = client_config.client_id
+    logger.info(f"[{client_id}] Running daily scout digest")
+
+    try:
+        from agents.scout_agent import ScoutAgent
+        from config.llm_client import get_llm_client, get_model_name, chat_with_retry
+
+        scout = ScoutAgent()
+
+        # Set lookback to 1 day for daily digest
+        original_lookback = client_config.scout.news_lookback_days
+        client_config.scout.news_lookback_days = 1
+
+        # Gather competitor intelligence
+        scout_section = await scout.gather_intelligence(client_config)
+
+        # Restore original lookback
+        client_config.scout.news_lookback_days = original_lookback
+
+        if not scout_section:
+            logger.info(f"[{client_id}] Daily scout: no relevant news found")
+            # Still push a "no news" update so stakeholders know the job ran
+            scout_section = (
+                "## 🔭 Daily Market Intelligence\n\n"
+                "No significant competitor or sector updates today. "
+                "Monitoring continues."
+            )
+
+        # Build the full daily digest
+        today = datetime.now().strftime("%B %d, %Y")
+        sector = client_config.scout.sector or "your sector"
+        competitors = ", ".join(client_config.scout.competitors) or "competitors"
+
+        full_digest = (
+            f"📡 **Clawrity Daily Scout — {client_config.client_name}**\n"
+            f"*{today}*\n"
+            f"*Sector: {sector} | Watching: {competitors}*\n\n"
+            f"---\n\n"
+            f"{scout_section}"
+        )
+
+        # Push to Slack webhook
+        webhook_url = client_config.channels.get("slack_webhook", "")
+        if webhook_url and webhook_url.startswith(("http://", "https://")):
+            await _push_to_slack(webhook_url, full_digest)
+            logger.info(f"[{client_id}] Daily scout digest pushed to Slack")
+        else:
+            logger.warning(f"[{client_id}] No valid Slack webhook for scout digest")
+
+        # Log the event
+        _log_digest_event(
+            client_id,
+            "success",
+            {
+                "event_type": "daily_scout",
+                "digest_length": len(full_digest),
+                "has_news": "No significant" not in full_digest,
+            },
+        )
+
+        return full_digest
+
+    except Exception as e:
+        logger.error(f"[{client_id}] Daily scout failed: {e}", exc_info=True)
+        _log_digest_event(
+            client_id, "failure", {"event_type": "daily_scout", "error": str(e)}
+        )
+        return None
 
 
 async def _etl_sync_placeholder(client_id: str):
