@@ -90,17 +90,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Protocol adapter init failed: {e}")
 
-    # 6. Start Slack bot
-    if orchestrator and protocol_adapter:
-        try:
-            slack_handler = SlackHandler(protocol_adapter, client_configs, orchestrator)
-            slack_handler.start()
-        except Exception as e:
-            logger.warning(f"Slack bot not started: {e}")
-    else:
-        logger.warning(
-            "Slack bot not started — orchestrator or protocol adapter missing"
-        )
+    # 6. Slack bot — DISABLED
+    # OpenClaw is the Slack gateway; Clawrity serves as the backend API only.
+    # Starting Socket Mode here would compete with OpenClaw for the same
+    # SLACK_APP_TOKEN WebSocket connection, causing a reconnection loop.
+    logger.info("Slack Socket Mode disabled — OpenClaw handles Slack gateway")
 
     # 7. Start scheduler
     try:
@@ -198,10 +192,6 @@ class CompareResponse(BaseModel):
     with_rag: ChatResponse
 
 
-class ScoutRequest(BaseModel):
-    client_id: str
-    query: str
-
 
 class ClientRequest(BaseModel):
     client_id: str
@@ -257,60 +247,6 @@ async def compare(request: CompareRequest):
     )
 
 
-@app.post("/scout")
-async def scout(request: ScoutRequest):
-    """Run a targeted scout search for competitor/market intelligence."""
-    if request.client_id not in client_configs:
-        raise HTTPException(
-            status_code=404, detail=f"Client not found: {request.client_id}"
-        )
-
-    config = client_configs[request.client_id]
-
-    try:
-        from agents.scout_agent import ScoutAgent
-
-        scout_agent = ScoutAgent()
-        result = await scout_agent.search_query(config, request.query)
-
-        if result is None:
-            return {
-                "response": "No relevant competitor or market news found for this query.",
-                "has_results": False,
-            }
-
-        return {"response": result, "has_results": True}
-    except Exception as e:
-        logger.error(f"Scout endpoint failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/scout/digest")
-async def scout_digest(request: ClientRequest):
-    """Run full scout agent digest for a client."""
-    if request.client_id not in client_configs:
-        raise HTTPException(
-            status_code=404, detail=f"Client not found: {request.client_id}"
-        )
-
-    config = client_configs[request.client_id]
-
-    try:
-        from agents.scout_agent import ScoutAgent
-
-        scout_agent = ScoutAgent()
-        result = await scout_agent.gather_intelligence(config)
-
-        if result is None:
-            return {
-                "response": "No relevant market intelligence found.",
-                "has_results": False,
-            }
-
-        return {"response": result, "has_results": True}
-    except Exception as e:
-        logger.error(f"Scout digest failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/digest")
