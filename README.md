@@ -170,16 +170,6 @@ uvicorn main:app --reload --port 8000
 5. **Basic Information** → copy `SLACK_SIGNING_SECRET`
 6. Invite the bot: `/invite @Clawrity` in your channel
 
-## LLM Providers
-
-Clawrity supports multiple LLM providers via a unified OpenAI-compatible client. Set `LLM_PROVIDER` in `.env`:
-
-| Provider | Speed | Quality | Rate Limit | Best For |
-|----------|-------|---------|------------|----------|
-| **Groq** | ⚡ ~500 tok/s | 70B model | 30 req/min (free) | Production use |
-| **Ollama** | ~10-20 tok/s (CPU) | 8B model | Unlimited | Offline / privacy |
-| **Mistral** | ~30 tok/s | Large model | 4 req/min (free) | Fallback |
-| **NVIDIA NIM** | ~100 tok/s | 70B model | Generous | Enterprise |
 
 ## Adding a New Client
 
