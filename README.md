@@ -1,7 +1,7 @@
 **Important Links:**
-- [🎥 Watch YouTube Demo](https://youtu.be/sXboHHSg4_k)
-- [📊 Clawrity Pitch Deck](https://github.com/threadsync/clawrity/blob/main/Clawrity_PitchDeck.pptx)
-- [📝 AI Disclosure Form](https://github.com/threadsync/clawrity/blob/main/OpenClaw_AI_Disclosure.docx)
+- [ Watch YouTube Demo](https://youtu.be/sXboHHSg4_k)
+- [ Clawrity Pitch Deck](https://github.com/threadsync/clawrity/blob/main/Clawrity_PitchDeck.pptx)
+- [ AI Disclosure Form](https://github.com/threadsync/clawrity/blob/main/OpenClaw_AI_Disclosure.docx)
 
 # Clawrity
 
