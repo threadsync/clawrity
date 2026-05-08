@@ -273,8 +273,12 @@ The API will be available at `http://localhost:8000`. Check health at `http://lo
 ## Slack App Setup (All Platforms)
 
 1. Create app at [api.slack.com/apps](https://api.slack.com/apps)
-2. **Socket Mode** --> Enable --> generate App-Level Token --> copy to `SLACK_APP_TOKEN`
-3. **OAuth & Permissions** --> add scopes:
+2. **Socket Mode** --> Enable 
+    generate App-Level Token --> copy to `SLACK_APP_TOKEN`
+
+3. **OAuth & Permissions** --> 
+    If openclaw gave a manifest json just copy it and paste in while creating app manifest or later in section called 'app manifest'
+    or manually add scopes:
    - `app_mentions:read`, `chat:write`, `channels:history`
    - `channels:read`, `im:history`, `im:read`, `im:write`
    - Install to Workspace --> copy `SLACK_BOT_TOKEN`
@@ -294,7 +298,7 @@ The API will be available at `http://localhost:8000`. Check health at `http://lo
 4. OpenClaw's memory system (`memory/` directory) provides session continuity across conversations
 5. Start OpenClaw -- it will connect to Slack via Socket Mode and route queries to the Clawrity backend
 
-## Adding a New Client
+## Adding a New Client(optional)
 
 1. Create `config/clients/client_newcorp.yaml`:
    ```yaml
