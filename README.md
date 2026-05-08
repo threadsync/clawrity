@@ -2,7 +2,19 @@
 
 Multi-channel AI business intelligence agent that delivers data-grounded insights, daily digests, and budget recommendations through Slack.
 
-Built on the [OpenClaw](https://github.com/openclaw) architecture -- Clawrity acts as the **backend intelligence layer** while OpenClaw handles the Slack gateway and routing. Each client gets a YAML config, a `SOUL.md` (personality + rules), and a `HEARTBEAT.md` (automated schedule) -- zero code changes to onboard a new client.
+## The Problem
+Organizations are drowning in data but starving for answers. 73% of enterprise data goes completely unused because the gap isn't data availability—it's **data accessibility**. Because data is inaccessible to non-technical users:
+- **Business Teams** waste 3-5 hours/week chasing analysts for simple insights.
+- **Analysts** lose 40% of their time acting as human query engines for repetitive ad-hoc requests.
+- **Executives** are forced to make delayed decisions based on stale, 40-page weekly reports.
+
+## The Solution
+Clawrity is an OpenClaw-powered Business Intelligence Agent that brings actionable, data-grounded insights directly to where your team works. Built on the [OpenClaw](https://github.com/openclaw) architecture, Clawrity acts as the **backend intelligence layer** while OpenClaw handles the Slack gateway and routing.
+
+- **Talk to Your Data:** Ask questions in plain English (e.g., *"What are the bottom 3 performing branches?"*) and receive formatted tables, analysis, and recommendations drawn directly from your live PostgreSQL database.
+- **Zero Hallucinations:** Our proprietary Gen → QA adversarial loop mathematically fact-checks every single number against the raw data before delivery.
+- **Automated Digests:** Scheduled morning briefings (via `HEARTBEAT.md`) pushed directly to executive channels.
+- **Zero-Code Onboarding:** Non-technical teams deploy customized agents instantly using just 3 simple text files (YAML + `SOUL.md` + `HEARTBEAT.md`).
 
 ## How It Works
 
