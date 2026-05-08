@@ -1,3 +1,8 @@
+**Important Links:**
+- [🎥 Watch YouTube Demo](https://youtu.be/sXboHHSg4_k)
+- [📊 Clawrity Pitch Deck](https://github.com/threadsync/clawrity/blob/main/Clawrity_PitchDeck.pptx)
+- [📝 AI Disclosure Form](https://github.com/threadsync/clawrity/blob/main/OpenClaw_AI_Disclosure.docx)
+
 # Clawrity
 
 Multi-channel AI business intelligence agent that delivers data-grounded insights, daily digests, and budget recommendations through Slack.
