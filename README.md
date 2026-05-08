@@ -240,7 +240,8 @@ Download the datasets and place them in `data\raw\`:
 - [Marketing Campaign Performance](https://kaggle.com/datasets/manishabhatt22/marketing-campaign-performance-dataset)
 
 ```cmd
-mkdir data\raw data\processed
+if not exist data\raw mkdir data\raw
+if not exist data\processed mkdir data\processed
 
 python scripts/seed_demo_data.py --client_id acme_corp --superstore data\raw\Global_Superstore2.csv --marketing data\raw\marketing_campaign_dataset.csv
 
